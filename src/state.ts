@@ -19,7 +19,7 @@ export function createEventSession(nameText = '', names: NameEntry[] = []): Even
     title: '',
     nameText,
     names,
-    spins: [{ id: createId(), title: 'Grand Prize', repeatable: false }],
+    spins: [{ id: createId(), title: 'Grand Prize', repeatable: false, exciting: false }],
     currentSpinIndex: 0,
     removedIds: [],
     results: [],
@@ -93,14 +93,14 @@ export function addSpin(session: EventSession): EventSession {
   const next = session.spins.length + 1
   return {
     ...session,
-    spins: [...session.spins, { id: createId(), title: `Prize ${next}`, repeatable: false }],
+    spins: [...session.spins, { id: createId(), title: `Prize ${next}`, repeatable: false, exciting: false }],
   }
 }
 
 export function updateSpin(
   session: EventSession,
   id: string,
-  patch: { title?: string; repeatable?: boolean },
+  patch: { title?: string; repeatable?: boolean; exciting?: boolean },
 ): EventSession {
   return {
     ...session,

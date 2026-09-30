@@ -11,6 +11,7 @@ type SpinAnimation = {
   to: number
   started: number
   duration: number
+  ease: (t: number) => number
   resolve: () => void
 }
 
@@ -49,7 +50,7 @@ export class Wheel {
     return this.animation !== null
   }
 
-  spinTo(index: number): Promise<void> {
+  spinTo(index: number, exciting = false): Promise<void> {
     if (this.animation || this.slices.length === 0) return Promise.resolve()
     const arc = (Math.PI * 2) / this.slices.length
     const desired = normalize(-(index + 0.5) * arc)
@@ -57,14 +58,15 @@ export class Wheel {
     let delta = desired - current
     if (delta <= 0.0001) delta += Math.PI * 2
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    const turns = reduce ? 0 : 5
-    const duration = reduce ? 350 : 4800
+    const feel = spinFeel(reduce, exciting)
+    const distance = delta + feel.turns * Math.PI * 2
     return new Promise((resolve) => {
       this.animation = {
         from: this.rotation,
-        to: this.rotation + delta + turns * Math.PI * 2,
+        to: this.rotation + distance,
         started: performance.now(),
-        duration,
+        duration: feel.duration,
+        ease: feel.ease(distance, feel.duration),
         resolve,
       }
       this.tick(performance.now())
@@ -75,7 +77,7 @@ export class Wheel {
     const animation = this.animation
     if (!animation) return
     const t = Math.min(1, (now - animation.started) / animation.duration)
-    this.rotation = animation.from + (animation.to - animation.from) * easeOutCubic(t)
+    this.rotation = animation.from + (animation.to - animation.from) * animation.ease(t)
     this.draw()
     this.onLiveName(this.sliceUnderPointer()?.label ?? null)
     if (t < 1) {
@@ -225,6 +227,85 @@ function normalize(angle: number): number {
   return ((angle % full) + full) % full
 }
 
+const EXCITING_CRAWL_SECONDS = 5
+const EXCITING_CRAWL_RAD_PER_SEC = Math.PI / 180
+
+function spinFeel(
+  reduce: boolean,
+  exciting: boolean,
+): { turns: number; duration: number; ease: (distance: number, duration: number) => (t: number) => number } {
+  if (reduce) return { turns: exciting ? 1 : 0, duration: exciting ? 900 : 350, ease: () => easeOutCubic }
+  if (exciting) {
+    return {
+      turns: 8 + Math.floor(Math.random() * 2),
+      duration: 12000 + Math.random() * 1500,
+      ease: easeExciting,
+    }
+  }
+  const energy = Math.random()
+  if (energy > 0.62) {
+    return {
+      turns: 7 + Math.floor(Math.random() * 3),
+      duration: 2600 + Math.random() * 800,
+      ease: () => easeOutQuart,
+    }
+  }
+  if (energy < 0.38) {
+    return {
+      turns: 2 + Math.floor(Math.random() * 2),
+      duration: 5600 + Math.random() * 2200,
+      ease: () => easeOutSine,
+    }
+  }
+  return {
+    turns: 4 + Math.floor(Math.random() * 2),
+    duration: 4000 + Math.random() * 1100,
+    ease: () => easeOutCubic,
+  }
+}
+
+/** Fast spin, then 5s already at 1°/s that keeps creeping and only settles at the end. */
+function easeExciting(distance: number, durationMs: number): (t: number) => number {
+  const duration = Math.max(durationMs / 1000, 0.001)
+  const crawlSeconds = Math.min(EXCITING_CRAWL_SECONDS, duration * 0.55)
+  // ∫(1-u^8) so speed stays near 1°/s and the stop is packed into the last moment.
+  const crawlDistance = Math.min(
+    EXCITING_CRAWL_RAD_PER_SEC * crawlSeconds * (8 / 9),
+    distance * 0.5,
+  )
+  const uJoin = 1 - crawlSeconds / duration
+  const pJoin = distance <= 0 ? 1 : 1 - crawlDistance / distance
+  const slopeJoin = distance <= 0 ? 0 : (EXCITING_CRAWL_RAD_PER_SEC * duration) / distance
+  const m1 = slopeJoin * uJoin
+  const m0 = pJoin * 3
+
+  return (t: number) => {
+    if (t >= 1) return 1
+    if (t <= 0) return 0
+    if (t >= uJoin) {
+      const u = (t - uJoin) / (1 - uJoin)
+      const covered = (9 / 8) * (u - u ** 9 / 9)
+      return pJoin + (1 - pJoin) * covered
+    }
+    const s = t / uJoin
+    return hermiteApproach(s, pJoin, m0, m1)
+  }
+}
+
+function hermiteApproach(s: number, p1: number, m0: number, m1: number): number {
+  const s2 = s * s
+  const s3 = s2 * s
+  return m0 * (s3 - 2 * s2 + s) + p1 * (-2 * s3 + 3 * s2) + m1 * (s3 - s2)
+}
+
+function easeOutSine(t: number): number {
+  return Math.sin((t * Math.PI) / 2)
+}
+
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3
+}
+
+function easeOutQuart(t: number): number {
+  return 1 - (1 - t) ** 4
 }

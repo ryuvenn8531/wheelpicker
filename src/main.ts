@@ -19,7 +19,7 @@ import {
   switchMode,
   updateSpin,
 } from './state'
-import type { Session } from './types'
+import type { NameEntry, Session } from './types'
 import { Wheel } from './wheel'
 
 const app = document.querySelector('#app')
@@ -154,6 +154,7 @@ backgroundColor.value = appearance.background
 let session: Session = loadSession()
 let spinning = false
 let showingResult = session.results.length > 0
+let landedWheel: NameEntry[] | null = null
 const parsedOnLoad = parseNameLabels(session.nameText)
 let nameCount = parsedOnLoad.labels.length
 let overLimit = parsedOnLoad.overLimit
@@ -286,6 +287,11 @@ spinList.addEventListener('input', (event) => {
   if (target.classList.contains('spin-repeat')) {
     session = updateSpin(session, id, { repeatable: target.checked })
     save()
+    return
+  }
+  if (target.classList.contains('spin-exciting')) {
+    session = updateSpin(session, id, { exciting: target.checked })
+    save()
   }
 })
 
@@ -320,6 +326,7 @@ document.addEventListener('keydown', (event) => {
   if (!showingResult || spinning) return
   event.preventDefault()
   showingResult = false
+  landedWheel = null
   render()
 })
 
@@ -327,6 +334,7 @@ resetButton.addEventListener('click', () => {
   if (spinning) return
   session = resetDraws(session)
   showingResult = false
+  landedWheel = null
   save()
   render()
 })
@@ -342,9 +350,11 @@ async function runSpin(): Promise<void> {
   const pool = activeNames(session)
   const winner = pickWinner(pool)
   const index = pool.findIndex((entry) => entry.id === winner.id)
+  landedWheel = pool
   spinning = true
   render()
-  await wheel.spinTo(index)
+  const exciting = session.mode === 'event' && currentSpin(session)?.exciting === true
+  await wheel.spinTo(index, exciting)
   session = commitResult(session, winner)
   spinning = false
   showingResult = true
@@ -377,7 +387,7 @@ function render(): void {
   renderStatus()
   renderHistory()
   renderRoster()
-  wheel.setSlices(activeNames(session))
+  wheel.setSlices(showingResult && landedWheel ? landedWheel : activeNames(session))
 }
 
 function renderSpins(): void {
@@ -402,6 +412,7 @@ function renderSpins(): void {
         <input class="spin-title" type="text" value="" aria-label="Spin ${index + 1} name" />
         <div class="spin-actions">
           <label class="check"><input class="spin-repeat" type="checkbox" /> Repeatable</label>
+          <label class="check"><input class="spin-exciting" type="checkbox" /> Exciting!</label>
           <button type="button" data-action="up" aria-label="Move spin ${index + 1} up">Up</button>
           <button type="button" data-action="down" aria-label="Move spin ${index + 1} down">Down</button>
           <button type="button" data-action="remove" aria-label="Remove spin ${index + 1}">Remove</button>
@@ -409,8 +420,10 @@ function renderSpins(): void {
       `
       const title = row.querySelector<HTMLInputElement>('.spin-title')!
       const repeat = row.querySelector<HTMLInputElement>('.spin-repeat')!
+      const exciting = row.querySelector<HTMLInputElement>('.spin-exciting')!
       title.value = spin.title
       repeat.checked = spin.repeatable
+      exciting.checked = spin.exciting
       return row
     }),
   )
@@ -447,15 +460,16 @@ function renderStatus(): void {
     : (reason ?? '')
   status.classList.toggle('is-alert', Boolean(overLimit || reason))
   spinButton.disabled = spinning || Boolean(reason)
-  liveName.disabled = spinning || (!showingResult && Boolean(reason))
+  liveName.disabled = spinning
   liveName.classList.toggle('is-spinning', spinning)
   liveName.classList.toggle('is-result', !spinning && showingResult)
+  liveName.classList.toggle('is-ready', !spinning && !showingResult)
   spinHint.hidden = spinning || !showingResult
   resetButton.disabled = spinning || (session.results.length === 0 && session.removedIds.length === 0)
 
   if (spinning) {
     liveName.textContent = 'Wait for it...'
-    liveMeta.textContent = ''
+    liveMeta.textContent = session.mode === 'event' ? eventSpinCaption() : ''
     return
   }
 
@@ -472,11 +486,22 @@ function renderStatus(): void {
   const last = session.results[session.results.length - 1]
   if (showingResult && last) {
     liveName.textContent = last.name
-    liveMeta.textContent = last.spinTitle ?? (last.repeatable ? 'Repeatable pick' : 'Removed from the wheel')
+    liveMeta.textContent =
+      session.mode === 'event'
+        ? eventSpinCaption()
+        : (last.spinTitle ?? (last.repeatable ? 'Repeatable pick' : 'Removed from the wheel'))
     return
   }
   liveName.textContent = 'Ready'
-  liveMeta.textContent = ''
+  liveMeta.textContent = session.mode === 'event' ? eventSpinCaption() : ''
+}
+
+function eventSpinCaption(): string {
+  if (session.mode !== 'event') return ''
+  const spin = currentSpin(session)
+  if (spin) return spin.title.trim() || 'Untitled spin'
+  if (session.spins.length > 0) return 'All spins complete'
+  return ''
 }
 
 function renderHistory(): void {

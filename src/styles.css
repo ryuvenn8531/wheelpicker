@@ -141,9 +141,17 @@ canvas {
   cursor: default;
 }
 
+.live-name.is-ready,
+.live-name.is-ready:disabled {
+  background: #2f9e4f;
+  color: #fff;
+  opacity: 1;
+  cursor: pointer;
+}
+
 .live-name:disabled:not(.is-spinning):not(.is-result) {
-  opacity: 0.55;
-  cursor: default;
+  opacity: 1;
+  cursor: pointer;
 }
 
 .live-meta {

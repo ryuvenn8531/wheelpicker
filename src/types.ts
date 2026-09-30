@@ -7,6 +7,7 @@ export type NamedSpin = {
   id: string
   title: string
   repeatable: boolean
+  exciting: boolean
 }
 
 export type SpinResult = {

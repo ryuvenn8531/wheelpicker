@@ -77,7 +77,12 @@ function normalizeSpins(value: unknown): NamedSpin[] {
     if (!item || typeof item !== 'object') continue
     const record = item as Record<string, unknown>
     if (typeof record.id !== 'string' || typeof record.title !== 'string') continue
-    spins.push({ id: record.id, title: record.title, repeatable: record.repeatable === true })
+    spins.push({
+      id: record.id,
+      title: record.title,
+      repeatable: record.repeatable === true,
+      exciting: record.exciting === true,
+    })
   }
   return spins
 }
