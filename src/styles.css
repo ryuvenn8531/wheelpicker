@@ -74,6 +74,11 @@ button, input, textarea { font: inherit; color: inherit; }
   top: 16px;
 }
 
+.stage.can-continue,
+.stage.can-continue .live-name {
+  cursor: pointer;
+}
+
 .wheel-frame {
   width: min(100%, 560px);
   margin: 0 auto;
@@ -138,7 +143,6 @@ canvas {
   background: #2f6fd6;
   color: #fff;
   opacity: 1;
-  cursor: default;
 }
 
 .live-name.is-ready,

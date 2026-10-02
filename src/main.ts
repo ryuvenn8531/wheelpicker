@@ -64,7 +64,7 @@ app.innerHTML = `
     <section class="stage">
       <div class="wheel-frame"><canvas id="wheel" aria-label="Name wheel"></canvas></div>
       <div class="result" aria-live="polite">
-        <p id="spin-hint" class="spin-hint" hidden>Press the space bar for the next spin</p>
+        <p id="spin-hint" class="spin-hint" hidden>Tap the wheel or press the space bar for the next spin</p>
         <div class="result-row">
           <button type="button" id="live-name" class="live-name">Ready</button>
         </div>
@@ -325,10 +325,20 @@ document.addEventListener('keydown', (event) => {
   }
   if (!showingResult || spinning) return
   event.preventDefault()
+  dismissResult()
+})
+
+const stage = document.querySelector<HTMLElement>('.stage')!
+stage.addEventListener('click', () => {
+  dismissResult()
+})
+
+function dismissResult(): void {
+  if (!showingResult || spinning) return
   showingResult = false
   landedWheel = null
   render()
-})
+}
 
 resetButton.addEventListener('click', () => {
   if (spinning) return
@@ -465,6 +475,7 @@ function renderStatus(): void {
   liveName.classList.toggle('is-result', !spinning && showingResult)
   liveName.classList.toggle('is-ready', !spinning && !showingResult)
   spinHint.hidden = spinning || !showingResult
+  stage.classList.toggle('can-continue', !spinning && showingResult)
   resetButton.disabled = spinning || (session.results.length === 0 && session.removedIds.length === 0)
 
   if (spinning) {
