@@ -40,4 +40,21 @@ export type EventSession = {
   results: SpinResult[]
 }
 
-export type Session = DirectSession | EventSession
+export type Pair = {
+  left: string
+  right: string
+}
+
+export type DoubleSession = {
+  mode: 'double'
+  leftText: string
+  leftNames: NameEntry[]
+  rightText: string
+  rightNames: NameEntry[]
+  exciting: boolean
+  results: Pair[][]
+}
+
+export type WheelSession = DirectSession | EventSession
+
+export type Session = WheelSession | DoubleSession

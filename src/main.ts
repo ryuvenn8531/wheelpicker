@@ -2,10 +2,13 @@ import './styles.css'
 import { applyAppearance, FONTS, loadAppearance, saveAppearance, type Appearance } from './appearance'
 import { WHEEL_PALETTES } from './palettes'
 import { MAX_NAMES, parseNameLabels } from './parseNames'
-import { isEventSession, loadSession, saveSession } from './storage'
+import { cycleSides } from './doubleSpin'
+import { isDoubleSession, isEventSession, loadSession, saveSession } from './storage'
 import {
   activeNames,
   addSpin,
+  buildMatching,
+  commitMatching,
   commitResult,
   currentSpin,
   moveSpin,
@@ -13,13 +16,15 @@ import {
   removeSpin,
   resetDraws,
   setDirectRepeatable,
+  setDoubleExciting,
+  setDoubleText,
   setEventTitle,
   setNameText,
   spinBlockReason,
   switchMode,
   updateSpin,
 } from './state'
-import type { NameEntry, Session } from './types'
+import type { NameEntry, Pair, Session } from './types'
 import { Wheel } from './wheel'
 
 const app = document.querySelector('#app')
@@ -35,6 +40,7 @@ app.innerHTML = `
       <div class="modes" role="group" aria-label="Wheel mode">
         <button type="button" id="mode-direct" aria-pressed="true">Direct Spin</button>
         <button type="button" id="mode-event" aria-pressed="false">Event</button>
+        <button type="button" id="mode-double" aria-pressed="false">Double</button>
       </div>
       <div class="settings">
         <button type="button" id="settings-toggle" class="gear" aria-label="Settings" aria-expanded="false" aria-controls="settings-panel">
@@ -63,9 +69,16 @@ app.innerHTML = `
   <main class="layout">
     <section class="stage">
       <div class="wheel-frame"><canvas id="wheel" aria-label="Name wheel"></canvas></div>
-      <div class="result" aria-live="polite">
+      <div id="pair-stage" class="pair-stage" hidden>
+        <div class="pair-boxes">
+          <div id="pair-left" class="pair-box">Ready</div>
+          <div id="pair-right" class="pair-box">Ready</div>
+        </div>
+        <ol id="pair-list" class="pair-list" aria-live="polite" hidden></ol>
+      </div>
+      <div class="result">
         <p id="spin-hint" class="spin-hint" hidden>Tap the wheel or press the space bar for the next spin</p>
-        <div class="result-row">
+        <div id="result-row" class="result-row">
           <button type="button" id="live-name" class="live-name">Ready</button>
         </div>
         <p id="live-meta" class="live-meta"></p>
@@ -77,12 +90,29 @@ app.innerHTML = `
         <input id="event-title" type="text" placeholder="Company lucky draw" />
       </label>
       <p id="progress" class="hint"></p>
-      <label>
+      <label id="names-field">
         Names, separated by commas
         <textarea id="names" placeholder="Ada, Grace, Linus"></textarea>
       </label>
       <p id="count" class="count">0/${MAX_NAMES}</p>
-      <p class="hint">Paste a list in one go. Empty entries are ignored. The wheel holds ${MAX_NAMES} names.</p>
+      <p id="names-hint" class="hint">Paste a list in one go. Empty entries are ignored. The wheel holds ${MAX_NAMES} names.</p>
+      <div id="double-fields" hidden>
+        <label>
+          Left, separated by commas
+          <textarea id="left-names" placeholder="Ada, Grace, Linus"></textarea>
+        </label>
+        <p id="left-count" class="count">0/${MAX_NAMES}</p>
+        <label>
+          Right, separated by commas
+          <textarea id="right-names" placeholder="Red, Blue, Gold"></textarea>
+        </label>
+        <p id="right-count" class="count">0/${MAX_NAMES}</p>
+        <p class="hint">Each spin pairs every name on the longer list. The shorter list is reused so its names are spread evenly, in a random order.</p>
+        <label class="check">
+          <input id="double-exciting" type="checkbox" />
+          Exciting!
+        </label>
+      </div>
       <label class="check" id="direct-repeat-field">
         <input id="direct-repeat" type="checkbox" />
         Repeatable — winners stay on the wheel
@@ -102,7 +132,7 @@ app.innerHTML = `
         <p class="section-title">Results</p>
         <ol id="history" class="history"></ol>
       </div>
-      <div>
+      <div id="roster-field">
         <p class="section-title">On the wheel</p>
         <ul id="roster" class="roster"></ul>
       </div>
@@ -111,16 +141,30 @@ app.innerHTML = `
 `
 
 const canvas = document.querySelector<HTMLCanvasElement>('#wheel')!
+const pairStage = document.querySelector<HTMLElement>('#pair-stage')!
+const pairLeft = document.querySelector<HTMLElement>('#pair-left')!
+const pairRight = document.querySelector<HTMLElement>('#pair-right')!
+const pairList = document.querySelector<HTMLElement>('#pair-list')!
 const liveName = document.querySelector<HTMLButtonElement>('#live-name')!
 const spinHint = document.querySelector<HTMLElement>('#spin-hint')!
+const resultRow = document.querySelector<HTMLElement>('#result-row')!
 const liveMeta = document.querySelector<HTMLElement>('#live-meta')!
 const modeDirect = document.querySelector<HTMLButtonElement>('#mode-direct')!
 const modeEvent = document.querySelector<HTMLButtonElement>('#mode-event')!
+const modeDouble = document.querySelector<HTMLButtonElement>('#mode-double')!
 const eventTitleField = document.querySelector<HTMLElement>('#event-title-field')!
 const eventTitle = document.querySelector<HTMLInputElement>('#event-title')!
 const progress = document.querySelector<HTMLElement>('#progress')!
+const namesLabel = document.querySelector<HTMLElement>('#names-field')!
 const namesField = document.querySelector<HTMLTextAreaElement>('#names')!
+const namesHint = document.querySelector<HTMLElement>('#names-hint')!
 const count = document.querySelector<HTMLElement>('#count')!
+const doubleFields = document.querySelector<HTMLElement>('#double-fields')!
+const leftField = document.querySelector<HTMLTextAreaElement>('#left-names')!
+const rightField = document.querySelector<HTMLTextAreaElement>('#right-names')!
+const leftCount = document.querySelector<HTMLElement>('#left-count')!
+const rightCount = document.querySelector<HTMLElement>('#right-count')!
+const doubleExciting = document.querySelector<HTMLInputElement>('#double-exciting')!
 const directRepeatField = document.querySelector<HTMLElement>('#direct-repeat-field')!
 const directRepeat = document.querySelector<HTMLInputElement>('#direct-repeat')!
 const eventSpins = document.querySelector<HTMLElement>('#event-spins')!
@@ -130,6 +174,7 @@ const spinButton = document.querySelector<HTMLButtonElement>('#spin')!
 const resetButton = document.querySelector<HTMLButtonElement>('#reset')!
 const status = document.querySelector<HTMLElement>('#status')!
 const history = document.querySelector<HTMLElement>('#history')!
+const rosterField = document.querySelector<HTMLElement>('#roster-field')!
 const roster = document.querySelector<HTMLElement>('#roster')!
 const settingsToggle = document.querySelector<HTMLButtonElement>('#settings-toggle')!
 const settingsPanel = document.querySelector<HTMLElement>('#settings-panel')!
@@ -155,9 +200,6 @@ let session: Session = loadSession()
 let spinning = false
 let showingResult = session.results.length > 0
 let landedWheel: NameEntry[] | null = null
-const parsedOnLoad = parseNameLabels(session.nameText)
-let nameCount = parsedOnLoad.labels.length
-let overLimit = parsedOnLoad.overLimit
 
 const wheel = new Wheel(canvas, () => {})
 wheel.setPalette(appearance.paletteId)
@@ -233,18 +275,25 @@ function renderPaletteOptions(): void {
 }
 
 modeDirect.addEventListener('click', () => {
-  if (spinning) return
-  session = switchMode(session, 'direct')
-  save()
-  render()
+  changeMode('direct')
 })
 
 modeEvent.addEventListener('click', () => {
-  if (spinning) return
-  session = switchMode(session, 'event')
+  changeMode('event')
+})
+
+modeDouble.addEventListener('click', () => {
+  changeMode('double')
+})
+
+function changeMode(mode: Session['mode']): void {
+  if (spinning || session.mode === mode) return
+  session = switchMode(session, mode)
+  showingResult = false
+  landedWheel = null
   save()
   render()
-})
+}
 
 eventTitle.addEventListener('input', () => {
   session = setEventTitle(session, eventTitle.value)
@@ -252,12 +301,30 @@ eventTitle.addEventListener('input', () => {
 })
 
 namesField.addEventListener('input', () => {
-  const update = setNameText(session, namesField.value)
-  session = update.session
-  nameCount = update.nameCount
-  overLimit = update.overLimit
+  if (session.mode === 'double') return
+  session = setNameText(session, namesField.value).session
   save()
   render()
+})
+
+leftField.addEventListener('input', () => {
+  if (!isDoubleSession(session)) return
+  session = setDoubleText(session, 'left', leftField.value).session
+  save()
+  render()
+})
+
+rightField.addEventListener('input', () => {
+  if (!isDoubleSession(session)) return
+  session = setDoubleText(session, 'right', rightField.value).session
+  save()
+  render()
+})
+
+doubleExciting.addEventListener('change', () => {
+  if (!isDoubleSession(session)) return
+  session = setDoubleExciting(session, doubleExciting.checked)
+  save()
 })
 
 directRepeat.addEventListener('change', () => {
@@ -357,6 +424,22 @@ render()
 
 async function runSpin(): Promise<void> {
   if (spinning || spinBlockReason(session)) return
+  if (session.mode === 'double') {
+    const pairs = buildMatching(session.leftNames, session.rightNames)
+    spinning = true
+    showingResult = false
+    render()
+    await cycleSides(pairs, session.exciting, (side, label) => {
+      if (side === 'left') pairLeft.textContent = label
+      else pairRight.textContent = label
+    })
+    session = commitMatching(session, pairs)
+    spinning = false
+    showingResult = true
+    save()
+    render()
+    return
+  }
   const pool = activeNames(session)
   const winner = pickWinner(pool)
   const index = pool.findIndex((entry) => entry.id === winner.id)
@@ -378,26 +461,46 @@ function save(): void {
 
 function render(): void {
   const event = isEventSession(session)
-  modeDirect.setAttribute('aria-pressed', String(!event))
+  const double = isDoubleSession(session)
+  modeDirect.setAttribute('aria-pressed', String(session.mode === 'direct'))
   modeEvent.setAttribute('aria-pressed', String(event))
+  modeDouble.setAttribute('aria-pressed', String(double))
   eventTitleField.hidden = !event
   eventSpins.hidden = !event
-  directRepeatField.hidden = event
+  directRepeatField.hidden = session.mode !== 'direct'
   progress.hidden = !event
+  namesLabel.hidden = double
+  count.hidden = double
+  namesHint.hidden = double
+  doubleFields.hidden = !double
+  rosterField.hidden = double
   if (session.mode === 'event') syncField(eventTitle, session.title)
-  syncField(namesField, session.nameText)
+  if (isDoubleSession(session)) {
+    syncField(leftField, session.leftText)
+    syncField(rightField, session.rightText)
+    doubleExciting.checked = session.exciting
+  } else {
+    syncField(namesField, session.nameText)
+  }
   if (session.mode === 'direct') directRepeat.checked = session.repeatable
   namesField.disabled = spinning
+  leftField.disabled = spinning
+  rightField.disabled = spinning
+  doubleExciting.disabled = spinning
   directRepeat.disabled = spinning
   eventTitle.disabled = spinning
   modeDirect.disabled = spinning
   modeEvent.disabled = spinning
+  modeDouble.disabled = spinning
   addSpinButton.disabled = spinning
   renderSpins()
+  renderPairStage()
   renderStatus()
   renderHistory()
   renderRoster()
-  wheel.setSlices(showingResult && landedWheel ? landedWheel : activeNames(session))
+  if (session.mode !== 'double') {
+    wheel.setSlices(showingResult && landedWheel ? landedWheel : activeNames(session))
+  }
 }
 
 function renderSpins(): void {
@@ -460,23 +563,87 @@ function updateSpinRowState(): void {
   })
 }
 
+function renderPairStage(): void {
+  const double = session.mode === 'double'
+  pairStage.hidden = !double
+  frame.hidden = double
+  resultRow.hidden = double
+  liveMeta.hidden = double
+  if (session.mode !== 'double') return
+  pairLeft.classList.toggle('is-spinning', spinning)
+  pairRight.classList.toggle('is-spinning', spinning)
+  pairLeft.classList.toggle('is-result', !spinning && showingResult)
+  pairRight.classList.toggle('is-result', !spinning && showingResult)
+  if (spinning) {
+    pairLeft.textContent = '…'
+    pairRight.textContent = '…'
+    pairList.hidden = true
+    pairList.replaceChildren()
+    return
+  }
+  const matching = showingResult ? session.results[session.results.length - 1] : undefined
+  pairList.hidden = !matching
+  if (!matching || matching.length === 0) {
+    pairLeft.textContent = 'Ready'
+    pairRight.textContent = 'Ready'
+    pairList.replaceChildren()
+    return
+  }
+  const last = matching[matching.length - 1]
+  pairLeft.textContent = last.left
+  pairRight.textContent = last.right
+  pairList.replaceChildren(...matching.map(pairRow))
+}
+
+function pairRow(pair: Pair): HTMLLIElement {
+  const item = document.createElement('li')
+  const left = document.createElement('span')
+  const join = document.createElement('span')
+  const right = document.createElement('span')
+  left.textContent = pair.left
+  join.className = 'pair-join'
+  join.textContent = '·'
+  right.textContent = pair.right
+  item.append(left, join, right)
+  return item
+}
+
 function renderStatus(): void {
-  count.textContent = `${nameCount}/${MAX_NAMES}`
-  count.classList.toggle('is-over', overLimit)
   const reason = spinBlockReason(session)
-  const extra = nameCount - MAX_NAMES
-  status.textContent = overLimit
-    ? `${extra} ${extra === 1 ? 'name' : 'names'} over the limit of ${MAX_NAMES}. The wheel was not updated.`
-    : (reason ?? '')
-  status.classList.toggle('is-alert', Boolean(overLimit || reason))
+  const double = session.mode === 'double'
+  if (session.mode === 'double') {
+    const left = parseNameLabels(session.leftText)
+    const right = parseNameLabels(session.rightText)
+    leftCount.textContent = `${left.labels.length}/${MAX_NAMES}`
+    rightCount.textContent = `${right.labels.length}/${MAX_NAMES}`
+    leftCount.classList.toggle('is-over', left.overLimit)
+    rightCount.classList.toggle('is-over', right.overLimit)
+    status.textContent = reason ?? ''
+  } else {
+    const parsed = parseNameLabels(session.nameText)
+    const extra = parsed.labels.length - MAX_NAMES
+    count.textContent = `${parsed.labels.length}/${MAX_NAMES}`
+    count.classList.toggle('is-over', parsed.overLimit)
+    status.textContent = parsed.overLimit
+      ? `${extra} ${extra === 1 ? 'name' : 'names'} over the limit of ${MAX_NAMES}. The wheel was not updated.`
+      : (reason ?? '')
+  }
+  status.classList.toggle('is-alert', status.textContent.length > 0)
   spinButton.disabled = spinning || Boolean(reason)
   liveName.disabled = spinning
   liveName.classList.toggle('is-spinning', spinning)
   liveName.classList.toggle('is-result', !spinning && showingResult)
   liveName.classList.toggle('is-ready', !spinning && !showingResult)
+  spinHint.textContent = double
+    ? 'Tap the boxes or press the space bar for the next spin'
+    : 'Tap the wheel or press the space bar for the next spin'
   spinHint.hidden = spinning || !showingResult
   stage.classList.toggle('can-continue', !spinning && showingResult)
-  resetButton.disabled = spinning || (session.results.length === 0 && session.removedIds.length === 0)
+  const hasDraws = session.mode === 'double'
+    ? session.results.length > 0
+    : session.results.length > 0 || session.removedIds.length > 0
+  resetButton.disabled = spinning || !hasDraws
+  if (session.mode === 'double') return
 
   if (spinning) {
     liveName.textContent = 'Wait for it...'
@@ -516,6 +683,23 @@ function eventSpinCaption(): string {
 }
 
 function renderHistory(): void {
+  if (isDoubleSession(session)) {
+    const pairs = session.results.flat()
+    if (pairs.length === 0) {
+      history.innerHTML = '<li><span>No spins yet</span></li>'
+      return
+    }
+    history.replaceChildren(
+      ...pairs.map((pair) => {
+        const item = document.createElement('li')
+        const label = document.createElement('span')
+        label.textContent = `${pair.left} · ${pair.right}`
+        item.append(label)
+        return item
+      }),
+    )
+    return
+  }
   if (session.results.length === 0) {
     history.innerHTML = '<li><span>No spins yet</span></li>'
     return
@@ -534,6 +718,7 @@ function renderHistory(): void {
 }
 
 function renderRoster(): void {
+  if (session.mode === 'double') return
   const removed = new Set(session.removedIds)
   if (session.names.length === 0) {
     roster.innerHTML = '<li><span>No names on the wheel</span></li>'

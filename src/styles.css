@@ -84,6 +84,64 @@ button, input, textarea { font: inherit; color: inherit; }
   margin: 0 auto;
 }
 
+.pair-stage {
+  display: grid;
+  gap: 16px;
+}
+
+.pair-boxes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.pair-box {
+  display: grid;
+  place-items: center;
+  min-height: 5.5rem;
+  padding: 16px;
+  border-radius: 16px;
+  background: #2f9e4f;
+  color: #fff;
+  font-size: clamp(1.15rem, 2.4vw, 1.6rem);
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.pair-box.is-spinning { background: #d64545; }
+
+.pair-box.is-result { background: #2f6fd6; }
+
+.stage.can-continue .pair-box { cursor: pointer; }
+
+.pair-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.pair-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--surface);
+  border-radius: 8px;
+}
+
+.pair-list li span:first-child { text-align: right; }
+
+.pair-list li span:last-child { text-align: left; }
+
+.pair-join { color: var(--muted); }
+
 canvas {
   display: block;
   width: 100%;
@@ -168,6 +226,11 @@ canvas {
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+#double-fields {
   display: grid;
   gap: 16px;
 }

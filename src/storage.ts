@@ -1,5 +1,5 @@
 import { createDirectSession } from './state'
-import type { EventSession, NameEntry, NamedSpin, Session, SpinResult } from './types'
+import type { DoubleSession, EventSession, NameEntry, NamedSpin, Pair, Session, SpinResult } from './types'
 
 const STORAGE_KEY = 'wheelpicker.session.v1'
 
@@ -35,6 +35,18 @@ function normalizeSession(value: unknown): Session | null {
       repeatable: record.repeatable === true,
       removedIds,
       results,
+    }
+  }
+
+  if (record.mode === 'double') {
+    return {
+      mode: 'double',
+      leftText: typeof record.leftText === 'string' ? record.leftText : '',
+      leftNames: normalizeNames(record.leftNames),
+      rightText: typeof record.rightText === 'string' ? record.rightText : '',
+      rightNames: normalizeNames(record.rightNames),
+      exciting: record.exciting === true,
+      results: normalizePairings(record.results),
     }
   }
 
@@ -110,6 +122,26 @@ function normalizeResults(value: unknown): SpinResult[] {
   return results
 }
 
+function normalizePairings(value: unknown): Pair[][] {
+  if (!Array.isArray(value)) return []
+  const runs: Pair[][] = []
+  for (const run of value) {
+    if (!Array.isArray(run)) continue
+    const pairs: Pair[] = []
+    for (const item of run) {
+      if (!item || typeof item !== 'object') continue
+      const record = item as Record<string, unknown>
+      if (typeof record.left !== 'string' || typeof record.right !== 'string') continue
+      const left = record.left.trim()
+      const right = record.right.trim()
+      if (!left || !right) continue
+      pairs.push({ left, right })
+    }
+    if (pairs.length > 0) runs.push(pairs)
+  }
+  return runs
+}
+
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.filter((item): item is string => typeof item === 'string')
@@ -117,4 +149,8 @@ function stringArray(value: unknown): string[] {
 
 export function isEventSession(session: Session): session is EventSession {
   return session.mode === 'event'
+}
+
+export function isDoubleSession(session: Session): session is DoubleSession {
+  return session.mode === 'double'
 }

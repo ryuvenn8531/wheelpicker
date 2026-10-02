@@ -1,6 +1,6 @@
 import { createId } from './ids'
 import { parseNameLabels } from './parseNames'
-import type { EventSession, NameEntry, Session, SpinResult } from './types'
+import type { DoubleSession, EventSession, NameEntry, Pair, Session, SpinResult, WheelSession } from './types'
 
 export function createDirectSession(): Session {
   return {
@@ -38,7 +38,7 @@ export function reconcileNames(previous: NameEntry[], labels: string[]): NameEnt
   })
 }
 
-export function activeNames(session: Session): NameEntry[] {
+export function activeNames(session: WheelSession): NameEntry[] {
   const removed = new Set(session.removedIds)
   return session.names.filter((entry) => !removed.has(entry.id))
 }
@@ -49,7 +49,7 @@ export type NameUpdate = {
   overLimit: boolean
 }
 
-export function setNameText(session: Session, nameText: string): NameUpdate {
+export function setNameText(session: WheelSession, nameText: string): NameUpdate {
   const parsed = parseNameLabels(nameText)
   if (parsed.overLimit) {
     return { session: { ...session, nameText }, nameCount: parsed.labels.length, overLimit: true }
@@ -64,19 +64,57 @@ export function setNameText(session: Session, nameText: string): NameUpdate {
   }
 }
 
+export function setDoubleText(session: DoubleSession, side: 'left' | 'right', text: string): NameUpdate {
+  const parsed = parseNameLabels(text)
+  if (side === 'left') {
+    if (parsed.overLimit) {
+      return { session: { ...session, leftText: text }, nameCount: parsed.labels.length, overLimit: true }
+    }
+    return {
+      session: { ...session, leftText: text, leftNames: reconcileNames(session.leftNames, parsed.labels) },
+      nameCount: parsed.labels.length,
+      overLimit: false,
+    }
+  }
+  if (parsed.overLimit) {
+    return { session: { ...session, rightText: text }, nameCount: parsed.labels.length, overLimit: true }
+  }
+  return {
+    session: { ...session, rightText: text, rightNames: reconcileNames(session.rightNames, parsed.labels) },
+    nameCount: parsed.labels.length,
+    overLimit: false,
+  }
+}
+
 export function switchMode(session: Session, mode: Session['mode']): Session {
   if (session.mode === mode) return session
+  const carried = session.mode === 'double'
+    ? { nameText: session.leftText, names: session.leftNames }
+    : { nameText: session.nameText, names: session.names }
   if (mode === 'direct') {
     return {
       mode: 'direct',
-      nameText: session.nameText,
-      names: session.names,
+      nameText: carried.nameText,
+      names: carried.names,
       repeatable: false,
       removedIds: [],
       results: [],
     }
   }
-  return createEventSession(session.nameText, session.names)
+  if (mode === 'event') return createEventSession(carried.nameText, carried.names)
+  return {
+    mode: 'double',
+    leftText: carried.nameText,
+    leftNames: carried.names,
+    rightText: '',
+    rightNames: [],
+    exciting: false,
+    results: [],
+  }
+}
+
+export function setDoubleExciting(session: DoubleSession, exciting: boolean): DoubleSession {
+  return { ...session, exciting }
 }
 
 export function setDirectRepeatable(session: Session, repeatable: boolean): Session {
@@ -132,6 +170,13 @@ export function moveSpin(session: EventSession, id: string, direction: -1 | 1): 
 }
 
 export function spinBlockReason(session: Session): string | null {
+  if (session.mode === 'double') {
+    const left = parseNameLabels(session.leftText)
+    const right = parseNameLabels(session.rightText)
+    if (left.overLimit || right.overLimit) return 'A list was not updated. Keep 80 names or fewer.'
+    if (left.labels.length === 0 || right.labels.length === 0) return 'Add a name to both lists.'
+    return null
+  }
   if (parseNameLabels(session.nameText).overLimit) {
     return 'The wheel was not updated. Keep 80 names or fewer.'
   }
@@ -150,12 +195,29 @@ export function currentSpin(session: Session) {
   return session.spins[session.currentSpinIndex] ?? null
 }
 
+export function buildMatching(left: NameEntry[], right: NameEntry[]): Pair[] {
+  if (left.length === 0 || right.length === 0) throw new Error('Both lists need a name')
+  const leftIsLonger = left.length >= right.length
+  const longer = shuffle(leftIsLonger ? left : right)
+  const shorter = balancedCopies(leftIsLonger ? right : left, longer.length)
+  return longer.map((entry, index) => {
+    const partner = shorter[index]
+    return leftIsLonger
+      ? { left: entry.label, right: partner.label }
+      : { left: partner.label, right: entry.label }
+  })
+}
+
+export function commitMatching(session: DoubleSession, pairs: Pair[]): DoubleSession {
+  return { ...session, results: [...session.results, pairs] }
+}
+
 export function pickWinner(names: NameEntry[]): NameEntry {
   if (names.length === 0) throw new Error('No names to pick')
   return names[fairIndex(names.length)]
 }
 
-export function commitResult(session: Session, winner: NameEntry): Session {
+export function commitResult(session: WheelSession, winner: NameEntry): WheelSession {
   if (session.mode === 'direct') {
     const result: SpinResult = {
       id: createId(),
@@ -195,7 +257,31 @@ export function resetDraws(session: Session): Session {
   if (session.mode === 'direct') {
     return { ...session, removedIds: [], results: [] }
   }
+  if (session.mode === 'double') return { ...session, results: [] }
   return { ...session, removedIds: [], results: [], currentSpinIndex: 0 }
+}
+
+function balancedCopies(items: NameEntry[], count: number): NameEntry[] {
+  const base = Math.floor(count / items.length)
+  const extra = count % items.length
+  const bonus = new Set(shuffle(items).slice(0, extra).map((item) => item.id))
+  const bag: NameEntry[] = []
+  for (const item of items) {
+    const times = base + (bonus.has(item.id) ? 1 : 0)
+    for (let copy = 0; copy < times; copy += 1) bag.push(item)
+  }
+  return shuffle(bag)
+}
+
+function shuffle<T>(items: T[]): T[] {
+  const copy = items.slice()
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swap = fairIndex(index + 1)
+    const current = copy[index]
+    copy[index] = copy[swap]
+    copy[swap] = current
+  }
+  return copy
 }
 
 function fairIndex(length: number): number {

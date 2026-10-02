@@ -230,6 +230,24 @@ function normalize(angle: number): number {
 const EXCITING_CRAWL_SECONDS = 5
 const EXCITING_CRAWL_RAD_PER_SEC = Math.PI / 180
 
+export type SpinMotion = {
+  duration: number
+  turns: number
+  ease: (t: number) => number
+}
+
+/** One independent roll of the wheel's spin timing, including an Exciting crawl. */
+export function rollSpinMotion(exciting = false): SpinMotion {
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const feel = spinFeel(reduce, exciting)
+  const distance = Math.max(feel.turns, 1) * Math.PI * 2
+  return {
+    duration: feel.duration,
+    turns: feel.turns,
+    ease: feel.ease(distance, feel.duration),
+  }
+}
+
 function spinFeel(
   reduce: boolean,
   exciting: boolean,
