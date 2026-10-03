@@ -31,6 +31,11 @@ export const WHEEL_PALETTES: readonly WheelPalette[] = [
     label: 'Neutral',
     colors: ['#EEF0F2', '#C6C7C4', '#A2999E', '#846A6A', '#353B3C'],
   },
+  {
+    id: 'aqua',
+    label: 'Aqua',
+    colors: ['#042A2B', '#5EB1BF', '#54F2F2', '#FCFCFC', '#F4E04D'],
+  },
 ]
 
 export function paletteById(id: string): WheelPalette {
